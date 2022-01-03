@@ -901,6 +901,11 @@ class DividerDrawer(object):
             plotter.plot(0, -body_minus_notches, lineStyle[6])  # FF to GG
 
             # Add fold lines
+            plotter.setXY(notch2, dividerHeight)  # ?  to DD
+            plotter.plot(dividerWidth - notch2 - notch3, 0, plotter.LINE)  # DD to L
+            plotter.plot(0, stackHeight)  # L  to M
+            plotter.plot(-dividerWidth + notch2 + notch3, 0, plotter.LINE)  # M  to CC
+
             self.canvas.setStrokeGray(0.9)
             plotter.setXY(
                 left2tab, dividerHeight + stackHeight + dividerBaseHeight
@@ -908,11 +913,6 @@ class DividerDrawer(object):
             plotter.plot(theTabWidth, 0, plotter.LINE)  # X  to S
             plotter.plot(0, stackHeight)  # S  to T
             plotter.plot(-theTabWidth, 0, plotter.LINE)  # V  to S
-
-            plotter.setXY(notch2, dividerHeight)  # ?  to DD
-            plotter.plot(dividerWidth - notch2 - notch3, 0, plotter.LINE)  # DD to L
-            plotter.plot(0, stackHeight)  # L  to M
-            plotter.plot(-dividerWidth + notch2 + notch3, 0, plotter.LINE)  # M  to CC
 
         self.canvas.restoreState()
 
