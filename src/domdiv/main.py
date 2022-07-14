@@ -29,9 +29,9 @@ TAB_SIDE_CHOICES = [
     "full",
 ]
 TEXT_CHOICES = ["card", "rules", "blank"]
-LINE_CHOICES = ["line", "dot", "cropmarks", "dot-cropmarks"]
+LINE_CHOICES = ["line", "dot", "cropmarks", "line-cropmarks", "dot-cropmarks"]
 
-EDITION_CHOICES = ["1", "2", "latest", "all"]
+EDITION_CHOICES = ["1", "2", "latest", "upgrade", "removed", "all"]
 
 ORDER_CHOICES = ["expansion", "global", "colour", "cost"]
 
@@ -358,6 +358,13 @@ def parse_opts(cmdline_args=None):
         dest="use_set_icon",
         help="Use set icon instead of a card icon.  Applies to Promo cards.",
     )
+    group_tab.add_argument(
+        "--expansion-reset-tabs",
+        action="store_true",
+        dest="expansion_reset_tabs",
+        help="When set, the tabs are restarted (left/right) at the beginning of each expansion. "
+        "If not set, the tab pattern will continue from one expansion to the next. ",
+    )
 
     # Expanion Dividers
     group_expansion = parser.add_argument_group(
@@ -383,13 +390,6 @@ def parse_opts(cmdline_args=None):
         help="Full width expansion dividers.",
     )
     group_expansion.add_argument(
-        "--expansion-reset-tabs",
-        action="store_true",
-        dest="expansion_reset_tabs",
-        help="When set, the tabs are restarted (left/right) at the beginning of each expansion. "
-        "If not set, the tab pattern will continue from one expansion to the next. ",
-    )
-    group_expansion.add_argument(
         "--expansion-dividers-long-name",
         action="store_true",
         dest="expansion_dividers_long_name",
@@ -408,7 +408,7 @@ def parse_opts(cmdline_args=None):
         action="append",
         dest="expansions",
         help="Limit dividers to only the specified expansions. "
-        "If no limits are set, then all expansions are included. "
+        "If no limits are set, then the latest expansions are included. "
         "Expansion names can also be given in the language specified by "
         "the --language parameter. Any expansion with a space in the name must "
         "be enclosed in double quotes. This may be called multiple times. "
@@ -460,13 +460,15 @@ def parse_opts(cmdline_args=None):
         "--edition",
         choices=EDITION_CHOICES,
         dest="edition",
-        default="all",
         help="Editions to include: "
         "'1' is for all 1st Editions; "
         "'2' is for all 2nd Editions; "
+        "'upgrade' is for all upgrade cards for each expansion; "
+        "'removed' is for all removed cards for each expansion; "
         "'latest' is for the latest edition for each expansion; "
-        "'all' is for all editions of expansions; "
-        " This can be combined with other options to refine the expansions to include in the output.",
+        "'all' is for all editions of expansions, upgrade cards, and removed cards; "
+        " This can be combined with other options to refine the expansions to include in the output."
+        " (default: all)",
     )
     group_select.add_argument(
         "--upgrade-with-expansion",
@@ -727,6 +729,7 @@ def parse_opts(cmdline_args=None):
         "'line' will print a solid line outlining the divider; "
         "'dot' will print a dot at each corner of the divider; "
         "'cropmarks' will print cropmarks for the divider; "
+        "'line-cropmarks' will combine 'line' and 'cropmarks'; "
         "'dot-cropmarks' will combine 'dot' and 'cropmarks'",
     )
     group_printing.add_argument(
@@ -787,13 +790,10 @@ def parse_opts(cmdline_args=None):
     group_special.add_argument(
         "--cardlist",
         dest="cardlist",
-        help="Path to file that enumerates each card to be printed on its own line.",
-    )
-    group_special.add_argument(
-        "--write-json",
-        action="store_true",
-        dest="write_json",
-        help="Write json version of card definitions and extras.",
+        help="Path to file that enumerates each card on its own line to be included or excluded."
+        " To include a card, add its card name on a line.  The name can optionally be preceeded by '+'."
+        " To exclude a card, add its card name on a line preseeded by a '-'"
+        " If any card is included by this method, only cards specified in this file will be printed.",
     )
     group_special.add_argument(
         "-c",
@@ -881,16 +881,14 @@ def clean_opts(options):
     if options.cropmarks and options.linetype == "line":
         options.linetype = "cropmarks"
 
-    if options.linetype == "cropmarks":
-        options.cropmarks = True
-
-    if options.linetype == "dot-cropmarks":
-        options.linetype = "dot"
+    if "cropmarks" in options.linetype:
         options.cropmarks = True
 
     if options.expansions is None:
-        # No instance given, so default to all Official expansions
+        # No instance given, so default to the latest Official expansions
         options.expansions = ["*"]
+        if options.edition is None:
+            options.edition = "latest"
     else:
         # options.expansions is a list of lists.  Reduce to single lowercase list
         options.expansions = [
@@ -905,6 +903,10 @@ def clean_opts(options):
         options.exclude_expansions = [
             item.lower() for sublist in options.exclude_expansions for item in sublist
         ]
+
+    if options.edition is None:
+        # set the default
+        options.edition = "all"
 
     if options.fan is None:
         # No instance given, so default to no Fan expansions
@@ -1500,10 +1502,12 @@ def filter_sort_cards(cards, options):
 
     # Combine upgrade cards with their expansion
     if options.upgrade_with_expansion:
+        if options.exclude_expansions is None:
+            options.exclude_expansions = []
         for card in cards:
             if Card.sets[card.cardset_tag]["upgrades"]:
+                options.exclude_expansions.append(card.cardset_tag.lower())
                 card.cardset_tag = Card.sets[card.cardset_tag]["upgrades"]
-                options.expansions.append(card.cardset_tag.lower())
 
     # Combine globally all cards of the given types
     # For example, Events, Landmarks, Projects, Ways
@@ -1751,9 +1755,16 @@ def filter_sort_cards(cards, options):
     # Get list of cards from a file
     if options.cardlist:
         cardlist = set()
+        cardlist_exclude = set()
         with open(options.cardlist) as cardfile:
             for line in cardfile:
-                cardlist.add(line.strip())
+                line = line.strip()
+                if line.startswith("-"):
+                    cardlist_exclude.add(line.lstrip("- \t"))
+                else:
+                    cardlist.add(line.lstrip("+ \t"))
+        if cardlist_exclude:
+            cards = [card for card in cards if card.name not in cardlist_exclude]
         if cardlist:
             cards = [card for card in cards if card.name in cardlist]
 

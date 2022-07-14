@@ -976,12 +976,12 @@ class DividerDrawer(object):
 
         return text.strip()
 
-    def add_inline_text(self, card, text):
+    def add_inline_text(self, card, text, emWidth):
         # Bonuses
         text = card.getBonusBoldText(text)
 
-        # <line>
-        replace = "<center>{}</center>\n".format("&ndash;" * 22)
+        # <line>: 11 em dashes, but not wider than the text box
+        replace = "<center>{}</center>\n".format("&mdash;" * min(11, int(emWidth)))
         text = re.sub(r"\<line\>", replace, text)
         #  <tab> and \t
         text = re.sub(r"\<tab\>", "\t", text)
@@ -1046,7 +1046,7 @@ class DividerDrawer(object):
 
             # now draw the number of sets
             if count > 1:
-                count_string = u"{}\u00d7".format(count)
+                count_string = "{}\u00d7".format(count)
                 width_string = stringWidth(
                     count_string, self.font_mapping["Regular"], 10
                 )
@@ -1493,7 +1493,8 @@ class DividerDrawer(object):
         minSpacerHeight = 0.05 * cm
 
         if not card.isExpansion():
-            descriptions = self.add_inline_text(card, descriptions)
+            emWidth = textBoxWidth / s.fontSize
+            descriptions = self.add_inline_text(card, descriptions, emWidth)
         descriptions = re.split("\n", descriptions)
         while True:
             paragraphs = []
@@ -1508,7 +1509,7 @@ class DividerDrawer(object):
                     p = Paragraph(dmod, s)
                 except ValueError as e:
                     raise ValueError(
-                        u'Error rendering text from "{}": {} ("{}")'.format(
+                        'Error rendering text from "{}": {} ("{}")'.format(
                             card.name, e, dmod
                         )
                     )
@@ -1861,6 +1862,8 @@ class DividerDrawer(object):
         if options.cropmarks:
             if "dot" in options.linetype.lower():
                 lineType = "dot"  # Allow the DOTs if requested
+            elif "line" in options.linetype.lower():
+                lineType = "line"  # Allow the LINEs if requested
             else:
                 lineType = "no_line"
         else:
@@ -1902,20 +1905,15 @@ class DividerDrawer(object):
         items = []
         nextTabIndex = CardPlot.tabRestart()
         lastCardSet = None
-        reset_expansion_tabs = (
-            options.expansion_dividers and options.expansion_reset_tabs
-        )
 
         for card in cards:
             # Check if tab needs to be reset to the start
-            if reset_expansion_tabs and not card.isExpansion():
+            if options.expansion_reset_tabs and not card.isExpansion():
                 if lastCardSet != card.cardset_tag:
                     # In a new expansion, so reset the tabs to start over
                     nextTabIndex = CardPlot.tabRestart()
-                    if (
-                        options.tab_number > Card.sets[card.cardset_tag]["count"]
-                        and Card.sets[card.cardset_tag]["count"] > 0
-                    ):
+                    cardset_count = Card.sets[card.cardset_tag].get("count", 0)
+                    if options.tab_number > cardset_count and cardset_count > 0:
 
                         #  Limit to the number of tabs to the number of dividers in the expansion
                         CardPlot.tabSetup(
@@ -1983,6 +1981,8 @@ class DividerDrawer(object):
         pages = []
         for pageNum, pageItems in enumerate(items):
             page = []
+            last_item = len(pageItems) - 1
+            last_row = (rows - 1) - (last_item // columns)
             for i in range(numPerPage):
                 if pageItems and i < len(pageItems):
                     # Given a CardPlot object called item, its number on the page, and the page number
@@ -1993,9 +1993,15 @@ class DividerDrawer(object):
                     pageItems[i].x = x * options.dividerWidthReserved
                     pageItems[i].y = y * options.dividerHeightReserved
                     pageItems[i].cropOnTop = (y == rows - 1) or RoomForCropV
-                    pageItems[i].cropOnBottom = (y == 0) or RoomForCropV
+                    pageItems[i].cropOnBottom = (
+                        (y == last_row)
+                        or (y == last_row + 1 and x > last_item % columns)
+                        or RoomForCropV
+                    )
                     pageItems[i].cropOnLeft = (x == 0) or RoomForCropH
-                    pageItems[i].cropOnRight = (x == columns - 1) or RoomForCropH
+                    pageItems[i].cropOnRight = (
+                        (x == columns - 1) or (i == last_item) or RoomForCropH
+                    )
                     # pageItems[i].rotation = 0
                     pageItems[i].page = pageNum + 1
                     page.append(pageItems[i])
